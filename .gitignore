@@ -1,0 +1,8 @@
+# Dev files and folders
+_*
+.*shinit
+/build
+.cache
+/installed_pkgs
+.venv
+/models
