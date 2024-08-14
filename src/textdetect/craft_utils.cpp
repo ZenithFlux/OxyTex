@@ -1,6 +1,8 @@
 #include "craft_utils.hpp"
-#include <cstdint>
 #include <opencv2/opencv.hpp>
+#include <cmath>
+#include <cstdint>
+#include <algorithm>
 
 
 namespace txdt {
@@ -34,13 +36,64 @@ DetBoxesData get_det_boxes_core(
     );
 
     for (int k=1; k < n_labels; ++k) {
+        // size filtering
         int size = stats(k, cv::CC_STAT_AREA);
         if (size < 10) continue;
 
+        // thresholding
         double max_val;
         cv::minMaxIdx(textmap, nullptr, &max_val, nullptr, nullptr, labels == k);
         if (max_val < cfg.text_thr) continue;
-        // Make segmentation map
+
+        // make segmentation map
+        cv::Mat segmap{
+            textmap.rows,
+            textmap.cols,
+            CV_MAKETYPE(CV_8U, textmap.channels()),
+            0
+        };
+        segmap.setTo(255, labels == k);
+        cv::Mat link_area;
+        cv::bitwise_and(link_score == 1, text_score == 0, link_area);
+        segmap.setTo(0, link_area);
+        int32_t &x = stats(k, cv::CC_STAT_LEFT), &y = stats(k, cv::CC_STAT_TOP);
+        int32_t &w = stats(k, cv::CC_STAT_WIDTH), &h = stats(k, cv::CC_STAT_HEIGHT);
+        int32_t niter = std::sqrt(size * std::min(w, h) / (w * h)) * 2;
+        int32_t sx = std::max(x - niter, 0);
+        int32_t ex = std::min(x + w + niter + 1, img_w);
+        int32_t sy = std::max(y - niter, 0);
+        int32_t ey = std::min(y + h + niter + 1, img_h);
+        cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, {1+niter, 1+niter});
+        cv::Mat submat = segmap(cv::Range(sy, ey), cv::Range(sx, ex));
+        cv::dilate(submat, submat, kernel);
+
+        // make box
+        std::vector<cv::Point> contours, box;
+        cv::findNonZero(segmap, contours);
+        cv::RotatedRect rectangle = cv::minAreaRect(contours);
+        cv::boxPoints(rectangle, box);
+
+        // align diamond shape
+        double wb = cv::norm(box[0] - box[1]);
+        double hb = cv::norm(box[1] - box[2]);
+        double box_ratio = std::max(wb, hb) / (std::min(wb, hb) + 1e-5);
+        if (std::abs(1 - box_ratio) <= 0.1) {
+            std::vector<int> ct_x(contours.size()), ct_y(contours.size());
+            for (int i=0; i < contours.size(); ++i) {
+                ct_x[i] = contours[i].x;
+                ct_y[i] = contours[i].y;
+            }
+            int l = *std::min_element(ct_x.begin(), ct_x.end());
+            int r = *std::max_element(ct_x.begin(), ct_x.end());
+            int t = *std::min_element(ct_y.begin(), ct_y.end());
+            int b = *std::max_element(ct_y.begin(), ct_y.end());
+            box = {
+                cv::Point(l, t),
+                cv::Point(r, t),
+                cv::Point(r, b),
+                cv::Point(l, b)
+            };
+        }
     }
 }
 
