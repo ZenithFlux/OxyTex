@@ -1,25 +1,52 @@
-#ifndef OXYTEX_TEXTDETECT_H_
-#define OXYTEX_TEXTDETECT_H_
+#ifndef OXYTEX_TEXTDETECT_DETECT_HPP_
+#define OXYTEX_TEXTDETECT_DETECT_HPP_
 
 #include <string>
 #include <opencv2/opencv.hpp>
+#include <optional>
+#include <torch/torch.h>
 
 namespace txdt {
 
-cv::Mat load_image(const std::string& img_file);
+template <typename T>
+using optional_ref = ::std::optional<std::reference_wrapper<T>>;
 
-std::pair<cv::Mat, double> resize_aspect_ratio(
-    cv::Mat img,
-    std::size_t square_size,
-    int interpolation,
-    double mag_ratio = 1
-);
+namespace TS = ::torch::jit::script;
 
-cv::Mat normalize_mean_variance(
-    cv::Mat img,
-    cv::Scalar mean = {0.485, 0.456, 0.406},
-    cv::Scalar variance = {0.229, 0.224, 0.225}
-);
+
+struct DetectConfig {
+    double mag_ratio;
+    int max_size;
+    double text_thr;
+    double link_thr;
+    double low_bound_text;
+    bool poly;
+};
+
+
+class CraftDetector {
+
+    public:
+        struct Output {
+            cv::Mat heatmap;
+        };
+
+        // Download models
+        CraftDetector();
+
+        // Load local models
+        CraftDetector(
+            const std::string& craft_path,
+            const optional_ref<std::string> refine_path = std::nullopt
+        );
+
+        // Detect text in the given image
+        Output detect_text(cv::Mat img, const DetectConfig& cfg, bool cuda);
+
+    private:
+        TS::Module _craftnet;
+        std::optional<TS::Module> _refinenet;
+};
 
 }
 

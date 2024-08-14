@@ -1,55 +1,65 @@
-#include <algorithm>
-#include <cstddef>
-#include <string>
+#include "detect.hpp"
+#include "imgproc.hpp"
 #include <torch/script.h>
 #include <opencv2/opencv.hpp>
-#include <utility>
+#include <string>
+#include <tuple>
 
 
 namespace txdt {
 
-cv::Mat load_image(const std::string& img_file) {
-    cv::Mat img = cv::imread(img_file);
-    cv::cvtColor(img, img, cv::COLOR_BGR2RGB);
-    return img;
+using namespace torch::indexing;
+
+// ----------------------------- CraftDetector ---------------------------------
+
+CraftDetector::CraftDetector() {
+    // Download models
 }
 
 
-std::pair<cv::Mat, double> resize_aspect_ratio(
-    cv::Mat img,
-    std::size_t square_size,
-    int interpolation,
-    double mag_ratio
+CraftDetector::CraftDetector(
+    const std::string& craft_path,
+    const optional_ref<std::string> refine_path
 ) {
-    int height = img.size[0], width = img.size[1];
-    double target_size = mag_ratio * std::max(height, width);
-
-    if (target_size > square_size) target_size = square_size;
-    mag_ratio = target_size / std::max(height, width);
-
-    int target_h = height * mag_ratio, target_w = width * mag_ratio;
-    cv::resize(img, img, {target_w, target_h}, 0, 0, interpolation);
-
-    int pad_b = 0, pad_r = 0;
-    if (target_h % 32 != 0) {
-        pad_b = 32 - target_h % 32;
+    _craftnet = torch::jit::load(craft_path);
+    _craftnet.eval();
+    if (refine_path) {
+        _refinenet = torch::jit::load(refine_path.value());
+        _refinenet.value().eval();
     }
-    if (target_w % 32 != 0) {
-        pad_r = 32 - target_w % 32;
-    }
-    cv::copyMakeBorder(img, img, 0, pad_b, 0, pad_r, cv::BORDER_CONSTANT, 0);
-    target_h += pad_b;
-    target_w += pad_r;
-
-    return {img, mag_ratio};
 }
 
 
-cv::Mat normalize_mean_variance(cv::Mat img, cv::Scalar mean, cv::Scalar variance) {
-    img.convertTo(img, CV_32F);
-    img -= mean * 255;
-    img /= variance * 255;
-    return img;
-};
+CraftDetector::Output CraftDetector::detect_text(
+    cv::Mat img,
+    const DetectConfig& cfg,
+    bool cuda
+) {
+    double target_ratio;
+    std::tie(img, target_ratio) = resize_aspect_ratio(
+        img,
+        cfg.max_size,
+        cv::INTER_LINEAR,
+        cfg.mag_ratio
+    );
+    img = txdt::normalize_mean_variance(img);
+    torch::Tensor img_ten = cv_to_torch(img, torch::dtype(torch::kF32));
+    img_ten.unsqueeze(0);
+    if (cuda) img_ten.to(torch::kCUDA);
+
+    torch::NoGradGuard no_grad;
+    c10::ivalue::TupleElements out = _craftnet.forward({img_ten}).toTuple()->elements();
+    torch::Tensor &y = out[0].toTensor(), &feature = out[1].toTensor();
+
+    torch::Tensor score_text = y.index({0, "...", 0}).detach().cpu();
+    torch::Tensor score_link = y.index({0, "...", 1}).detach().cpu();
+
+    if (_refinenet) {
+        torch::Tensor y_refiner = _refinenet.value().forward({y, feature}).toTensor();
+        score_link = y_refiner.index({0, "...", 0}).detach().cpu();
+    }
+
+    // Implement getDetBoxes
+}
 
 }
