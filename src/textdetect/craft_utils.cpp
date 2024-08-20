@@ -119,6 +119,26 @@ DetBoxesData get_det_boxes_core(
     return {det, labels, mapper};
 }
 
+
+auto get_poly_core(
+    const cv::Mat_<cv::Point>& boxes,
+    const cv::Mat_<int32_t>& labels,
+    const std::vector<int>& mapper,
+    const cv::Mat& linkmap
+) {
+    // configs
+    const int num_cp = 5;
+    const double max_len_ratio = 0.7;
+    const double expand_ratio = 1.45;
+    const double max_r = 2.0;
+    const double step_r = 0.2;
+
+    // Some list 'polys' to be added
+    for (int k=0; k<boxes.rows; ++k) {
+        cv::Mat_<cv::Point> box = boxes.row(k);
+        int32_t w = cv::norm(box(0) - box(1)) + 1;
+        int32_t h = cv::norm(box(1) - box(2)) + 1;
+    }
 }
 
 }

@@ -1,10 +1,10 @@
 #ifndef OXYTEX_TEXTDETECT_DETECT_HPP_
 #define OXYTEX_TEXTDETECT_DETECT_HPP_
 
-#include <string>
 #include <opencv2/opencv.hpp>
+#include <torch/script.h>
+#include <string>
 #include <optional>
-#include <torch/torch.h>
 
 namespace txdt {
 
