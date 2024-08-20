@@ -1,5 +1,6 @@
 #include "craft_utils.hpp"
 #include <opencv2/opencv.hpp>
+#include <climits>
 #include <cmath>
 #include <cstdint>
 #include <algorithm>
@@ -8,8 +9,11 @@
 namespace txdt {
 
 struct DetBoxesData {
-
+    cv::Mat_<cv::Point> det;
+    cv::Mat_<int32_t> labels;
+    std::vector<int> mapper;
 };
+
 
 DetBoxesData get_det_boxes_core(
     const cv::Mat& textmap,
@@ -26,15 +30,19 @@ DetBoxesData get_det_boxes_core(
     text_score_comb.setTo(1, text_score_comb > 1);
     text_score_comb.convertTo(text_score_comb, CV_8U);
 
-    cv::Mat labels, centroids;
-    cv::Mat_<int32_t> stats;
+    cv::Mat centroids;
+    cv::Mat_<int32_t> stats, labels;
     int n_labels = cv::connectedComponentsWithStats(
         text_score_comb,
-        labels, stats,
+        labels,
+        stats,
         centroids,
         4
     );
 
+    int box_count = 0;
+    cv::Mat_<cv::Point> det(n_labels, 4);
+    std::vector<int> mapper;
     for (int k=1; k < n_labels; ++k) {
         // size filtering
         int size = stats(k, cv::CC_STAT_AREA);
@@ -94,7 +102,23 @@ DetBoxesData get_det_boxes_core(
                 cv::Point(l, b)
             };
         }
+        // make clockwise order
+        size_t startidx = std::min_element(
+            box.begin(),
+            box.end(),
+            [](cv::Point a, cv::Point b) { return a.x + a.y < b.x + b.y; }
+        ) - box.begin();
+
+        std::rotate(box.begin(), box.begin()+startidx, box.end());
+
+        ++box_count;
+        det.push_back(box);
+        mapper.push_back(k);
     }
+    det.resize(box_count);
+    return {det, labels, mapper};
+}
+
 }
 
 }
